@@ -1,0 +1,6 @@
+.DS_Store
+__pycache__/
+.venv/
+
+# Streamlit secrets (do not commit real keys)
+.streamlit/secrets.toml
