@@ -6,8 +6,10 @@ Core Logic Engine: Clinical Processor & SOP Matching
 import json
 import os
 import re
+import time
 from google import genai
 from google.genai import types
+from google.genai import errors as genai_errors
 
 # ── SOP Rule Definitions ──────────────────────────────────────────────────────
 
@@ -174,15 +176,37 @@ def extract_clinical_facts(transcript: str) -> dict:
         )
     client = genai.Client(api_key=api_key)
     model_name = os.environ.get("GEMINI_MODEL", DEFAULT_GEMINI_MODEL)
-    response = client.models.generate_content(
-        model=model_name,
-        contents=f"Extract clinical facts from this transcript:\n\n{transcript}",
-        config=types.GenerateContentConfig(
-            system_instruction=EXTRACTION_SYSTEM_PROMPT,
-            max_output_tokens=1500,
-            response_mime_type="application/json",
-        ),
-    )
+    last_exc = None
+    for attempt in range(3):
+        try:
+            response = client.models.generate_content(
+                model=model_name,
+                contents=f"Extract clinical facts from this transcript:\n\n{transcript}",
+                config=types.GenerateContentConfig(
+                    system_instruction=EXTRACTION_SYSTEM_PROMPT,
+                    max_output_tokens=1500,
+                    response_mime_type="application/json",
+                ),
+            )
+            break
+        except genai_errors.ClientError as e:
+            status = getattr(e, "status_code", None)
+            if status == 429:
+                raise RuntimeError(
+                    "Gemini API quota exceeded (HTTP 429). Your API key/project currently has no "
+                    "available quota for this model. Check Gemini API quotas/billing, or try again "
+                    "later if you are rate-limited."
+                ) from e
+            if status == 503 and attempt < 2:
+                last_exc = e
+                time.sleep(2 ** attempt)
+                continue
+            raise
+    else:
+        raise RuntimeError(
+            "Gemini API is temporarily unavailable (HTTP 503). The model is overloaded — "
+            "please try again in a few seconds."
+        ) from last_exc
     if not response.text:
         raise RuntimeError(
             "Gemini returned no text; the response may have been blocked or empty. "

@@ -11,9 +11,9 @@ from logic_engine import process_transcript, STATUS_COLORS, SOP_RULES
 
 # Load API credentials from Streamlit secrets (preferred) into env vars (used by logic_engine).
 try:
-    if "GEMINI_API_KEY" in st.secrets and not os.environ.get("GEMINI_API_KEY"):
+    if "GEMINI_API_KEY" in st.secrets:
         os.environ["GEMINI_API_KEY"] = str(st.secrets["GEMINI_API_KEY"])
-    if "GEMINI_MODEL" in st.secrets and not os.environ.get("GEMINI_MODEL"):
+    if "GEMINI_MODEL" in st.secrets:
         os.environ["GEMINI_MODEL"] = str(st.secrets["GEMINI_MODEL"])
 except StreamlitSecretNotFoundError:
     # No secrets file configured; fall back to env vars.
