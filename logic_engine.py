@@ -150,9 +150,10 @@ Extract the following fields. Use null if information is not mentioned or unclea
 }
 
 Critical extraction rules:
-- dental: if patient says visit "in May", "last month", "just had cleaning" = within_6_months: true. If no mention or > 6 months = false
+- dental_last_visit_within_6_months: if patient says visit "in May", "last month", "just had cleaning", or has a routine cleaning scheduled imminently (e.g. "next week") with no pending restorative work, set to true. If no mention or clearly > 6 months ago, set to false.
+- dental_pending_work: any recommended restorative work (crowns, fillings, extractions, root canals) counts as pending = true, even if the dentist described it as "not urgent", "eventually", or "can wait". Only a routine cleaning or checkup with no recommended work = false.
 - active_smoker: true even if light/occasional ("cigarette with my coffee", "half-pack a day")
-- has_pt_history: gym exercises without a professional therapist do NOT count. "two sessions in the gym" = false. "12 weeks of PT with ABC Physical Therapy" = true
+- has_pt_history: requires a formal course of at least several weeks (typically 6+) with a licensed physical therapist. Two sessions or fewer does NOT count even if with a licensed PT — "went twice, stopped" = false. Gym exercises or a personal trainer do NOT count regardless of duration. "8 weeks at Riverside PT" or "12 weeks at ProMotion PT" = true.
 - opioids: "pretty much daily for 2 years" = daily_opioid_use: true, opioid_duration_months: 24
 - case_type: mentions of weight loss, bariatric, sleeve, lap band = "Bariatric"; hip, knee, joint replacement = "Joint"
 - clinical_notes: 2-3 sentence plain-English summary of the patient's situation and key clinical concerns
@@ -185,7 +186,7 @@ def extract_clinical_facts(transcript: str) -> dict:
                 config=types.GenerateContentConfig(
                     system_instruction=EXTRACTION_SYSTEM_PROMPT,
                     temperature=0,
-                    max_output_tokens=1500,
+                    max_output_tokens=2500,
                     response_mime_type="application/json",
                 ),
             )
