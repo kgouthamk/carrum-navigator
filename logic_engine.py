@@ -184,6 +184,7 @@ def extract_clinical_facts(transcript: str) -> dict:
                 contents=f"Extract clinical facts from this transcript:\n\n{transcript}",
                 config=types.GenerateContentConfig(
                     system_instruction=EXTRACTION_SYSTEM_PROMPT,
+                    temperature=0,
                     max_output_tokens=1500,
                     response_mime_type="application/json",
                 ),
