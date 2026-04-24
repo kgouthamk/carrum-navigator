@@ -11,49 +11,112 @@ generate routing recommendations with human-in-the-loop verification.
 ## Setup Instructions
 
 ### 1. Prerequisites
-- Python 3.9+
+- Python 3.11+
 - A [Google AI Studio](https://aistudio.google.com/apikey) Gemini API key
 
-### 2. Install dependencies
+### 2. Install runtime dependencies
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install --upgrade pip
-python -m pip install -r requirements.txt
+pip install -r requirements.txt
 ```
 
 ### 3. Set your API key
 
-#### Option A (recommended): Streamlit secrets (no terminal export)
-Create `.streamlit/secrets.toml` (this file is git-ignored) by copying the example:
+#### Option A (recommended): Streamlit secrets (no terminal export needed)
 
-```bash
-mkdir -p .streamlit
-cp .streamlit/secrets.toml.example .streamlit/secrets.toml
-```
-
-Then edit `.streamlit/secrets.toml` and set:
+Create `.streamlit/secrets.toml` (this file is git-ignored):
 
 ```toml
 GEMINI_API_KEY = "your-key-here"
-# Optional:
-# GEMINI_MODEL = "gemini-2.5-flash"
+GEMINI_MODEL = "gemini-2.5-flash"   # recommended; default is gemini-2.0-flash
 ```
 
-#### Option B: Environment variables (temporary per terminal session)
+> **Important:** `secrets.toml` always takes precedence over environment variables.
+> If you update your key, restart the Streamlit server for it to take effect.
+
+#### Option B: Environment variables (per terminal session)
 ```bash
 export GEMINI_API_KEY="your-key-here"
-# Optional: pick a model (default is gemini-2.0-flash)
-# export GEMINI_MODEL="gemini-2.5-flash"
+export GEMINI_MODEL="gemini-2.5-flash"   # optional
 ```
 
 ### 4. Run the app
 ```bash
 source .venv/bin/activate
-python -m streamlit run app.py
+streamlit run app.py
 ```
 
 The app will open at `http://localhost:8501`
+
+---
+
+## Testing
+
+The test suite is split into two tiers: fast unit tests (no API calls) and LLM eval tests
+(require an API key and burn quota — opt-in only).
+
+### Install dev dependencies
+```bash
+pip install -r requirements-dev.txt
+```
+
+### Unit tests — run on every change (fast, no API)
+
+Tests all deterministic logic in `logic_engine.py`: flag derivation, SOP rule matching,
+status priority, and every boundary case in the answer key.
+
+```bash
+pytest
+# or verbosely:
+pytest -v
+```
+
+**What's covered (45 tests):**
+
+| Class | What it tests |
+|---|---|
+| `TestDentalClearance` | Pending work fires even with a recent visit; upcoming cleaning does not |
+| `TestSmoking` | Quit within 3 months still counts as active smoker |
+| `TestPhysicalTherapy` | `null` ≠ `False` — unknown PT history does not block the case |
+| `TestHbA1c` | 7.0 is **not** > 7.0 (boundary); null → no flag |
+| `TestOpioids` | Exactly 3 months is **not** > 3 months (boundary); twice-a-week ≠ daily |
+| `TestBariatricFlags` | EGD recency, RD credential presence |
+| `TestApplySopRules` | Joint rules skip Bariatric cases and vice versa; GEN-001 fires for all |
+| `TestOverallStatus` | Severity ladder: Ineligible beats all; priority ordering across all statuses |
+
+### LLM eval tests — run on demand (hits the Gemini API)
+
+Runs the full pipeline (`process_transcript`) against 10 hand-crafted transcripts in
+`additional_transcripts/` and checks `SOP_Flags` + `Overall_Case_Status` against the
+hand-authored answer key (`additional_transcripts/EVAL_ANSWER_KEY.md`).
+
+```bash
+# Option 1: CLI flag
+pytest --run-evals -v
+
+# Option 2: environment variable
+RUN_EVALS=1 pytest -v
+```
+
+**What each eval covers:**
+
+| # | Patient | Case type | Expected status | Key test |
+|---|---|---|---|---|
+| 01 | James R. | Joint | Clear | Happy path; HbA1c 6.8 does not fire |
+| 02 | Denise K. | Joint | Deferred | Quit 6 weeks ago = still within 3-month window |
+| 03 | Marcus T. | Bariatric | Clear | Sandra Okonkwo RD recognized as valid RD |
+| 04 | Patricia M. | Joint | Clear | HbA1c = 7.0 boundary; cleaning ≠ pending work; twice-weekly tramadol ≠ daily opioid |
+| 05 | Linda F. | Bariatric | Revision Case | Weight Watchers ≠ RD; all 4 flags fire simultaneously |
+| 06 | Raymond G. | Joint | Action Required | Opioid = 3 months boundary; pending crown fires even if "not urgent" |
+| 07 | Trevor N. | Joint | Ineligible | LA Fitness personal trainer ≠ formal PT; meloxicam ≠ opioid |
+| 08 | Camille B. | Bariatric | Hold | Gym nutritionist w/ unknown credentials ≠ RD; EGD 5 weeks ago is within range |
+| 09 | Gerald O. | Joint | Ineligible | All 5 flags fire; 2 PT sessions ≠ formal PT |
+| 10 | Dorothy W. | Joint | (see note) | Quit 1987 = not active; unknown medication ≠ assumed opioid; null handling |
+
+> **Known limitation (Dorothy #10):** When key fields are genuinely ambiguous, the system
+> currently returns `Clear` instead of a "needs follow-up" status. This is a documented gap
+> that requires a schema change to add an `Incomplete` overall status.
 
 ---
 
@@ -61,10 +124,19 @@ The app will open at `http://localhost:8501`
 
 ```
 carrum-navigator/
-├── app.py              # Streamlit UI application
-├── logic_engine.py     # Clinical Processor + SOP Engine
-├── requirements.txt    # Python dependencies
-└── README.md
+├── app.py                          # Streamlit UI application
+├── logic_engine.py                 # Clinical Processor + SOP Engine
+├── requirements.txt                # Runtime dependencies
+├── requirements-dev.txt            # Dev/test dependencies (pytest)
+├── pytest.ini                      # Test configuration
+├── tests/
+│   ├── conftest.py                 # Secrets loading, --run-evals flag
+│   ├── test_unit.py                # 45 deterministic unit tests (no API)
+│   └── test_evals.py               # 10 LLM eval tests (opt-in, API required)
+└── additional_transcripts/
+    ├── 01_james_joint_all_clear.txt
+    ├── ...
+    └── EVAL_ANSWER_KEY.md          # Hand-authored ground truth for evals
 ```
 
 ---
@@ -76,7 +148,7 @@ Transcript (raw text)
         │
         ▼
 ┌─────────────────────────────┐
-│  Layer 1: Clinical Processor │  ← LLM (Google Gemini)
+│  Layer 1: Clinical Processor │  ← LLM (Google Gemini, temperature=0)
 │  Extract structured facts    │     Handles ambiguity,
 │  → JSON schema output        │     colloquial phrasing
 └──────────────┬──────────────┘
@@ -118,7 +190,7 @@ Transcript (raw text)
 1. Push code to a GitHub repository
 2. Go to [share.streamlit.io](https://share.streamlit.io)
 3. Connect your repo, set `app.py` as the main file
-4. Add `GEMINI_API_KEY` (and optionally `GEMINI_MODEL`) in the Secrets manager
+4. Add `GEMINI_API_KEY` and `GEMINI_MODEL` in the Secrets manager
 5. Deploy
 
 ---
